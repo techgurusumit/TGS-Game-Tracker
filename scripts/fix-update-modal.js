@@ -1,44 +1,49 @@
 const fs = require('node:fs');
 const path = require('node:path');
-
-const file = path.join(__dirname, '..', 'src', 'index.ts');
+const file = path.join(process.cwd(), 'src', 'index.ts');
 let source = fs.readFileSync(file, 'utf8');
 
-const oldButton = "if(['update','delete','fixtures'].includes(action)){await i.showModal(passwordModal(action,id));return;}";
-const newButton = "if(action==='update'){await i.showModal(updateModal(t));return;}if(['delete','fixtures'].includes(action)){await i.showModal(passwordModal(action,id));return;}";
+// Update button must open ONE modal containing password + editable fields.
+source = source.replace(
+  "if(['update','delete','fixtures'].includes(action)){await i.showModal(passwordModal(action,id));return;}",
+  "if(action==='update'){await i.showModal(updateModal(t));return;}if(['delete','fixtures'].includes(action)){await i.showModal(passwordModal(action,id));return;}"
+);
 
-if (source.includes(oldButton)) {
-  source = source.replace(oldButton, newButton);
+// Replace the entire password-modal handler with a version that never calls showModal()
+// on a ModalSubmitInteraction.
+const start = source.indexOf('async function handlePasswordModal(i:ModalSubmitInteraction)');
+const end = source.indexOf('\nasync function handleUpdateForm', start);
+if (start === -1 || end === -1) throw new Error('Could not locate tournament modal handlers.');
+
+const newPasswordHandler = `async function handlePasswordModal(i:ModalSubmitInteraction){const parts=i.customId.split(':');const action=parts[2],id=Number(parts[3]);const t=await passwordOk(i,id);if(!t)return;
+  if(action==='delete'){db.prepare('DELETE FROM tournaments WHERE id=?').run(id);await i.reply({content:\`🗑️ Tournament **\${t.name}** deleted.\`,ephemeral:true});return;}
+  if(action==='fixtures'){try{const r=createFixtures(id);await i.reply({content:\`✅ Fixtures created for **\${t.name}**.\n👥 Players: \${r.players}\n📐 Bracket size: \${r.size}\n\nUse /fixtures to view them.\`,ephemeral:true});}catch(e:any){await i.reply({content:\`❌ \${e?.message||'Could not create fixtures.'}\`,ephemeral:true});}return;}
 }
+`;
+source = source.slice(0, start) + newPasswordHandler + source.slice(end);
 
-const oldPasswordUpdate = `  const modal=new ModalBuilder().setCustomId(\`tgs:update-form:\${id}\`).setTitle('Update Tournament');
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('password').setLabel('Tournament password').setStyle(TextInputStyle.Short).setRequired(true).setMinLength(4)),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tournament name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.name)),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('game').setLabel('Game name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.game_name||'General')),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('status').setLabel('Status: draft/live/completed').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.status)),
-  );
-  await i.showModal(modal);`;
-
-const newPasswordUpdate = `  const name=i.fields.getTextInputValue('name').trim(),gameName=i.fields.getTextInputValue('game').trim(),status=i.fields.getTextInputValue('status').trim().toLowerCase();
-  const g=getGame(gameName);
-  if(!g){await i.reply({content:\`❌ Game **\${gameName}** not found.\`,ephemeral:true});return;}
-  if(!['draft','live','completed','fixtures_created'].includes(status)){await i.reply({content:'❌ Invalid status.',ephemeral:true});return;}
-  if(!name){await i.reply({content:'❌ Tournament name cannot be empty.',ephemeral:true});return;}
-  try{db.prepare('UPDATE tournaments SET name=?,game_id=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(name,g.id,status,id);await i.reply({content:\`✅ Tournament updated to **\${name}** • 🎮 \${g.name} • \${status}\`,ephemeral:true});}
-  catch{await i.reply({content:'❌ Could not update tournament. The name may already exist.',ephemeral:true});}`;
-
-if (source.includes(oldPasswordUpdate)) {
-  source = source.replace(oldPasswordUpdate, newPasswordUpdate);
-}
-
-const marker = "function passwordModal(action:string,id:number){";
+// Add the combined update modal before the password handler.
 if (!source.includes('function updateModal(t:any)')) {
-  const insertAt = source.indexOf('\n', source.indexOf(marker));
-  const end = source.indexOf('\nasync function passwordOk', insertAt);
-  const updateModal = `\nfunction updateModal(t:any){const m=new ModalBuilder().setCustomId(\`tgs:password:update:\${t.id}\`).setTitle('Update Tournament');m.addComponents(\n  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('password').setLabel('Tournament password').setStyle(TextInputStyle.Short).setRequired(true).setMinLength(4)),\n  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tournament name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.name)),\n  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('game').setLabel('Game name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.game_name||'General')),\n  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('status').setLabel('Status: draft/live/completed').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.status)),\n);return m;}\n`;
-  if (end !== -1) source = source.slice(0, end) + updateModal + source.slice(end);
+  const marker = 'async function handlePasswordModal(i:ModalSubmitInteraction)';
+  const pos = source.indexOf(marker);
+  const modal = `function updateModal(t:any){const m=new ModalBuilder().setCustomId(\`tgs:update-form:\${t.id}\`).setTitle('Update Tournament');m.addComponents(
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('password').setLabel('Tournament password').setStyle(TextInputStyle.Short).setRequired(true).setMinLength(4)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tournament name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.name)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('game').setLabel('Game name').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.game_name||'General')),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('status').setLabel('Status: draft/live/completed').setStyle(TextInputStyle.Short).setRequired(true).setValue(t.status)),
+);return m;}
+`;
+  source = source.slice(0, pos) + modal + source.slice(pos);
+}
+
+// Replace the update-form handler with direct validation/update. It receives one modal submission.
+const ustart = source.indexOf('async function handleUpdateForm(i:ModalSubmitInteraction)');
+const uend = source.indexOf('\nfunction birthdayDateIndia', ustart);
+if (ustart !== -1 && uend !== -1) {
+  const newUpdateHandler = `async function handleUpdateForm(i:ModalSubmitInteraction){const id=Number(i.customId.split(':')[2]),t=getTournamentById(id);if(!t){await i.reply({content:'❌ Tournament not found.',ephemeral:true});return;}const p=i.fields.getTextInputValue('password');if(!t.password_hash||!t.password_salt||!verifyPassword(p,t.password_hash,t.password_salt)){await i.reply({content:'❌ Incorrect tournament password.',ephemeral:true});return;}const name=i.fields.getTextInputValue('name').trim(),gameName=i.fields.getTextInputValue('game').trim(),status=i.fields.getTextInputValue('status').trim().toLowerCase();const g=getGame(gameName);if(!g){await i.reply({content:\`❌ Game **\${gameName}** not found.\`,ephemeral:true});return;}if(!['draft','live','completed','fixtures_created'].includes(status)){await i.reply({content:'❌ Invalid status.',ephemeral:true});return;}if(!name){await i.reply({content:'❌ Tournament name cannot be empty.',ephemeral:true});return;}try{db.prepare('UPDATE tournaments SET name=?,game_id=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(name,g.id,status,id);await i.reply({content:\`✅ Tournament updated to **\${name}** • 🎮 \${g.name} • \${status}\`,ephemeral:true});}catch{await i.reply({content:'❌ Could not update tournament. The name may already exist.',ephemeral:true});}}
+`;
+  source = source.slice(0, ustart) + newUpdateHandler + source.slice(uend);
 }
 
 fs.writeFileSync(file, source);
-console.log('Tournament update modal patch applied (or already present).');
+console.log('Tournament update modal fixed: password + fields are now handled in one modal.');
