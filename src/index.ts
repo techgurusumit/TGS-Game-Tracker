@@ -49,73 +49,32 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
   if(!t){await i.editReply('❌ Tournament not found.');return}
   const parts=db.prepare('SELECT p.name,tp.seed FROM tournament_players tp JOIN players p ON p.id=tp.player_id WHERE tp.tournament_id=? ORDER BY CASE WHEN tp.seed IS NULL THEN 1 ELSE 0 END,tp.seed,p.name').all(t.id) as any[];
   const races=db.prepare('SELECT ra.id,ra.race_no,ra.track,ra.created_at FROM races ra WHERE ra.tournament_id=? ORDER BY ra.race_no').all(t.id) as any[];
-  const rows=db.prepare("SELECT p.name,COALESCE(SUM(r.points),0) total,COUNT(r.id) races,MIN(r.position) best_position,AVG(r.position) avg_position FROM tournament_players tp JOIN players p ON p.id=tp.player_id LEFT JOIN races ra ON ra.tournament_id=tp.tournament_id LEFT JOIN results r ON r.race_id=ra.id AND r.player_id=p.id WHERE tp.tournament_id=? GROUP BY p.id ORDER BY total DESC,CASE WHEN races=0 THEN 1 ELSE 0 END,best_position ASC,p.name ASC").all(t.id) as any[];
-  const matches=db.prepare(`SELECT m.round_no,m.round_name,m.match_no,p1.name player1,p2.name player2,w.name winner,m.score1,m.score2,m.status FROM matches m LEFT JOIN players p1 ON p1.id=m.player1_id LEFT JOIN players p2 ON p2.id=m.player2_id LEFT JOIN players w ON w.id=m.winner_id WHERE m.tournament_id=? ORDER BY m.round_no,m.match_no`).all(t.id) as any[];
-  const raceResults=db.prepare(`SELECT ra.race_no,ra.track,p.name player,r.position,r.points,r.kd FROM results r JOIN races ra ON ra.id=r.race_id JOIN players p ON p.id=r.player_id WHERE ra.tournament_id=? ORDER BY ra.race_no,r.position,p.name`).all(t.id) as any[];
+  const rows=db.prepare('SELECT p.name,COALESCE(SUM(r.points),0) total,COUNT(r.id) races,MIN(r.position) best_position,AVG(r.position) avg_position FROM tournament_players tp JOIN players p ON p.id=tp.player_id LEFT JOIN races ra ON ra.tournament_id=tp.tournament_id LEFT JOIN results r ON r.race_id=ra.id AND r.player_id=p.id WHERE tp.tournament_id=? GROUP BY p.id ORDER BY total DESC,CASE WHEN races=0 THEN 1 ELSE 0 END,best_position ASC,p.name ASC').all(t.id) as any[];
+  const matches=db.prepare('SELECT m.round_no,m.round_name,m.match_no,p1.name player1,p2.name player2,w.name winner,m.score1,m.score2,m.status FROM matches m LEFT JOIN players p1 ON p1.id=m.player1_id LEFT JOIN players p2 ON p2.id=m.player2_id LEFT JOIN players w ON w.id=m.winner_id WHERE m.tournament_id=? ORDER BY m.round_no,m.match_no').all(t.id) as any[];
+  const raceResults=db.prepare('SELECT ra.race_no,ra.track,p.name player,r.position,r.points,r.kd FROM results r JOIN races ra ON ra.id=r.race_id JOIN players p ON p.id=r.player_id WHERE ra.tournament_id=? ORDER BY ra.race_no,r.position,p.name').all(t.id) as any[];
   const champion=matches.find(m=>String(m.round_name)==='Final'&&m.status==='completed')?.winner||null;
   const format=t.fixture_format==='knockout_3rd'?'Knockout + 3rd Place Decider':t.fixture_format==='round_robin'?'Round Robin':t.fixture_format==='league'?'League':'Knockout';
-  const statusLabel=String(t.status||'draft').replace(/_/g,' ').replace(/\\b\\w/g,x=>x.toUpperCase());
-
-  const summaryEmbed=new EmbedBuilder()
-   .setTitle(`🏆 ${t.name} — Tournament Report`)
-   .addFields(
-    {name:'🎮 Game',value:t.game_name||'General',inline:true},
-    {name:'⚙️ Format',value:format,inline:true},
-    {name:'📌 Status',value:statusLabel,inline:true},
-    {name:'🏆 Champion',value:champion||'TBD',inline:true},
-    {name:'👥 Participants',value:String(parts.length),inline:true},
-    {name:'🏁 Races',value:String(races.length),inline:true},
-    {name:'⚔️ Matches',value:String(matches.length),inline:true}
-   );
-
-  const participantFields=parts.length?parts.map((p,n)=>({
-   name:`#${n+1} ${p.name}`,
-   value:p.seed!=null?`Seed: #${p.seed}`:'Seed: —',
-   inline:true
-  })):[{name:'Participants',value:'No participants recorded.',inline:false}];
-  const participantEmbeds:EmbedBuilder[]=[];
-  for(let i=0;i<participantFields.length;i+=12){
-   participantEmbeds.push(new EmbedBuilder().setTitle(i===0?'👥 Participants':'👥 Participants — Continued').addFields(participantFields.slice(i,i+12)));
-  }
-
-  const standingFields=rows.length?rows.map((r,n)=>({
-   name:`#${n+1} ${r.name}`,
-   value:`**${Number(r.total||0)} pts**\nRaces: ${r.races}\nBest: P${r.best_position??'-'}\nAverage: P${Number(r.avg_position||0).toFixed(1)}`,
-   inline:true
-  })):[{name:'Point Standings',value:'No race results recorded.',inline:false}];
-  const standingEmbeds:EmbedBuilder[]=[];
-  for(let i=0;i<standingFields.length;i+=9){
-   standingEmbeds.push(new EmbedBuilder().setTitle(i===0?'📊 Point Standings':'📊 Point Standings — Continued').addFields(standingFields.slice(i,i+9)));
-  }
-
-  const fixtureFields=matches.length?matches.map(m=>({
-   name:`${m.round_name} #${m.match_no}`,
-   value:`**${m.player1||'TBD'}**  ${m.score1??'-'} - ${m.score2??'-'}  **${m.player2||'TBD'}**\n${m.status==='completed'?`🏆 Winner: **${m.winner||'TBD'}**`:m.status==='bye'?`➡️ Bye: **${m.winner||'TBD'}**`:'⏳ Status: Pending'}`,
-   inline:false
-  })):[{name:'Fixtures',value:'No fixtures recorded.',inline:false}];
-  const fixtureEmbeds:EmbedBuilder[]=[];
-  for(let i=0;i<fixtureFields.length;i+=6){
-   fixtureEmbeds.push(new EmbedBuilder().setTitle(i===0?'⚔️ Fixture Results':'⚔️ Fixture Results — Continued').addFields(fixtureFields.slice(i,i+6)));
-  }
-
-  const raceFields=raceResults.length?raceResults.map(r=>({
-   name:`Race ${r.race_no} — ${r.track||'Track not set'}`,
-   value:`**${r.player}**\nPosition: P${r.position??'-'}\nPoints: **${r.points??0}**${r.kd!=null?`\nKD: ${r.kd}`:''}`,
-   inline:true
-  })):[{name:'Race Results',value:'No race results recorded.',inline:false}];
-  const raceEmbeds:EmbedBuilder[]=[];
-  for(let i=0;i<raceFields.length;i+=9){
-   raceEmbeds.push(new EmbedBuilder().setTitle(i===0?'🏁 Race Results':'🏁 Race Results — Continued').addFields(raceFields.slice(i,i+9)));
-  }
-
-  const embeds=[summaryEmbed,...participantEmbeds,...standingEmbeds,...fixtureEmbeds,...raceEmbeds];
-  try{
-   const file=tournamentExcel(t);
-   await i.editReply({embeds,files:[file]});
-  }catch(fileError){
-   console.error('Tournament report attachment error:',fileError);
-   await i.editReply({embeds});
-  }
+  const statusLabel=String(t.status||'draft').replace(/_/g,' ').replace(/\b\w/g,x=>x.toUpperCase());
+  const summaryEmbed=new EmbedBuilder().setTitle('🏆 '+t.name+' — Tournament Report').addFields(
+   {name:'🎮 Game',value:t.game_name||'General',inline:true},
+   {name:'⚙️ Format',value:format,inline:true},
+   {name:'📌 Status',value:statusLabel,inline:true},
+   {name:'🏆 Champion',value:champion||'TBD',inline:true},
+   {name:'👥 Participants',value:String(parts.length),inline:true},
+   {name:'🏁 Races',value:String(races.length),inline:true},
+   {name:'⚔️ Matches',value:String(matches.length),inline:true}
+  );
+  const participantText=parts.length?parts.map((p,n)=>(n+1)+'. '+p.name+(p.seed!=null?' — Seed #'+p.seed:'')).join('\n'):'No participants recorded.';
+  const participantEmbed=new EmbedBuilder().setTitle('👥 Participants').addFields({name:'Players',value:clean(participantText,1000),inline:false});
+  const standingText=rows.length?rows.map((r,n)=>(n+1)+'. **'+r.name+'** — '+Number(r.total||0)+' pts • '+r.races+' race'+(Number(r.races)===1?'':'s')+' • Best: '+(r.best_position!=null?'P'+r.best_position:'—')+' • Avg: '+(r.avg_position!=null?Number(r.avg_position).toFixed(1):'—')).join('\n'):'No participants recorded.';
+  const standingEmbed=new EmbedBuilder().setTitle('📊 Point Standings').setDescription(clean(standingText,1900));
+  const fixtureText=matches.length?matches.map(m=>m.round_name+' #'+m.match_no+'\n**'+(m.player1||'TBD')+'**  '+(m.score1??'-')+' - '+(m.score2??'-')+'  **'+(m.player2||'TBD')+'**\n'+(m.status==='completed'?'🏆 Winner: **'+(m.winner||'TBD')+'**':m.status==='bye'?'➡️ Bye: **'+(m.winner||'TBD')+'**':'⏳ Status: Pending')).join('\n\n'):'No fixtures recorded.';
+  const fixtureEmbed=new EmbedBuilder().setTitle('⚔️ Match Results').setDescription(clean(fixtureText,1900));
+  const raceText=raceResults.length?raceResults.map(r=>'Race '+r.race_no+' — '+(r.track||'Track not set')+'\n**'+r.player+'** — P'+(r.position??'-')+' • '+(r.points??0)+' pts'+(r.kd!=null?' • KD '+r.kd:'')).join('\n\n'):'No race results recorded yet.\nUse `/race` to record race points and positions.';
+  const raceEmbed=new EmbedBuilder().setTitle('🏁 Race Results').setDescription(clean(raceText,1900));
+  const embeds=[summaryEmbed,participantEmbed,standingEmbed,fixtureEmbed,raceEmbed];
+  try{const file=tournamentExcel(t);await i.editReply({embeds,files:[file]})}
+  catch(fileError){console.error('Tournament report attachment error:',fileError);await i.editReply({embeds})}
  }catch(e:any){
   console.error('Tournament report error:',e);
   await i.editReply('❌ Could not generate the tournament report. Check the bot console for the exact error.');
