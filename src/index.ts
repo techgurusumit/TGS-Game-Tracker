@@ -49,7 +49,7 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
   if(!t){await i.editReply('❌ Tournament not found.');return}
   const parts=db.prepare('SELECT p.name,tp.seed FROM tournament_players tp JOIN players p ON p.id=tp.player_id WHERE tp.tournament_id=? ORDER BY CASE WHEN tp.seed IS NULL THEN 1 ELSE 0 END,tp.seed,p.name').all(t.id) as any[];
   const races=db.prepare('SELECT ra.id,ra.race_no,ra.track,ra.created_at FROM races ra WHERE ra.tournament_id=? ORDER BY ra.race_no').all(t.id) as any[];
-  const rows=db.prepare(`SELECT p.name,SUM(r.points) total,COUNT(r.id) races,MIN(r.position) best_position,AVG(r.position) avg_position FROM results r JOIN players p ON p.id=r.player_id JOIN races ra ON ra.id=r.race_id WHERE ra.tournament_id=? GROUP BY p.id ORDER BY total DESC,best_position ASC,p.name ASC`).all(t.id) as any[];
+  const rows=db.prepare("SELECT p.name,COALESCE(SUM(r.points),0) total,COUNT(r.id) races,MIN(r.position) best_position,AVG(r.position) avg_position FROM tournament_players tp JOIN players p ON p.id=tp.player_id LEFT JOIN races ra ON ra.tournament_id=tp.tournament_id LEFT JOIN results r ON r.race_id=ra.id AND r.player_id=p.id WHERE tp.tournament_id=? GROUP BY p.id ORDER BY total DESC,CASE WHEN races=0 THEN 1 ELSE 0 END,best_position ASC,p.name ASC").all(t.id) as any[];
   const matches=db.prepare(`SELECT m.round_no,m.round_name,m.match_no,p1.name player1,p2.name player2,w.name winner,m.score1,m.score2,m.status FROM matches m LEFT JOIN players p1 ON p1.id=m.player1_id LEFT JOIN players p2 ON p2.id=m.player2_id LEFT JOIN players w ON w.id=m.winner_id WHERE m.tournament_id=? ORDER BY m.round_no,m.match_no`).all(t.id) as any[];
   const raceResults=db.prepare(`SELECT ra.race_no,ra.track,p.name player,r.position,r.points,r.kd FROM results r JOIN races ra ON ra.id=r.race_id JOIN players p ON p.id=r.player_id WHERE ra.tournament_id=? ORDER BY ra.race_no,r.position,p.name`).all(t.id) as any[];
   const champion=matches.find(m=>String(m.round_name)==='Final'&&m.status==='completed')?.winner||null;
@@ -80,7 +80,7 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
 
   const standingFields=rows.length?rows.map((r,n)=>({
    name:`#${n+1} ${r.name}`,
-   value:`**${Number(r.total||0)} pts**\\nRaces: ${r.races}\\nBest: P${r.best_position??'-'}\\nAverage: P${Number(r.avg_position||0).toFixed(1)}`,
+   value:`**${Number(r.total||0)} pts**\nRaces: ${r.races}\nBest: P${r.best_position??'-'}\nAverage: P${Number(r.avg_position||0).toFixed(1)}`,
    inline:true
   })):[{name:'Point Standings',value:'No race results recorded.',inline:false}];
   const standingEmbeds:EmbedBuilder[]=[];
@@ -90,7 +90,7 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
 
   const fixtureFields=matches.length?matches.map(m=>({
    name:`${m.round_name} #${m.match_no}`,
-   value:`**${m.player1||'TBD'}**  ${m.score1??'-'} - ${m.score2??'-'}  **${m.player2||'TBD'}**\\n${m.status==='completed'?`🏆 Winner: **${m.winner||'TBD'}**`:m.status==='bye'?`➡️ Bye: **${m.winner||'TBD'}**`:'⏳ Status: Pending'}`,
+   value:`**${m.player1||'TBD'}**  ${m.score1??'-'} - ${m.score2??'-'}  **${m.player2||'TBD'}**\n${m.status==='completed'?`🏆 Winner: **${m.winner||'TBD'}**`:m.status==='bye'?`➡️ Bye: **${m.winner||'TBD'}**`:'⏳ Status: Pending'}`,
    inline:false
   })):[{name:'Fixtures',value:'No fixtures recorded.',inline:false}];
   const fixtureEmbeds:EmbedBuilder[]=[];
@@ -100,7 +100,7 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
 
   const raceFields=raceResults.length?raceResults.map(r=>({
    name:`Race ${r.race_no} — ${r.track||'Track not set'}`,
-   value:`**${r.player}**\\nPosition: P${r.position??'-'}\\nPoints: **${r.points??0}**${r.kd!=null?`\\nKD: ${r.kd}`:''}`,
+   value:`**${r.player}**\nPosition: P${r.position??'-'}\nPoints: **${r.points??0}**${r.kd!=null?`\nKD: ${r.kd}`:''}`,
    inline:true
   })):[{name:'Race Results',value:'No race results recorded.',inline:false}];
   const raceEmbeds:EmbedBuilder[]=[];
