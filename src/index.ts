@@ -103,7 +103,7 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
   );
   const participantFields=parts.length?parts.map((p:any,n:number)=>({name:'#'+(n+1)+' '+p.name,value:p.seed!=null?'Seed: #'+p.seed:'Seed: —',inline:true})):[{name:'Participants',value:'No participants recorded.',inline:false}];
   const participantEmbed=new EmbedBuilder().setTitle('👥 Participants').addFields(participantFields.slice(0,25));
-  const standingLines=standings.map((r:any,n:number)=>{const rp=races.length?raceResults.filter((x:any)=>Number(x.player_id)===Number(r.id)).map((x:any)=>'R'+x.race_no+': '+x.points+' pts').join(' • ')||'No race points':'No race points';return (n===0&&hasRacePoints?'🏆 ':'')+'**'+(n+1)+'. '+r.name+'** — **'+Number(r.total_points||0)+' pts** • '+r.races+' races • Best P'+(r.best_position??'-')+' • Avg P'+(r.avg_position==null?'-':Number(r.avg_position).toFixed(1))+'\n   '+rp});
+  const standingLines=standings.map((r:any,n:number)=>{const rp=races.length?raceResults.filter((x:any)=>Number(x.player_id)===Number(r.id)).map((x:any)=>'R'+x.race_no+': '+x.points+' pts').join(' • ')||'No race points':'No race points';return ((hasRacePoints&&n===0)||(!hasRacePoints&&tournamentWinner===r.name)?'🏆 ':'')+'**'+(n+1)+'. '+r.name+'** — **'+Number(r.total_points||0)+' pts** • '+r.races+' races • Best P'+(r.best_position??'-')+' • Avg P'+(r.avg_position==null?'-':Number(r.avg_position).toFixed(1))+'\n   '+rp});
   const standingsText=standingLines.length?standingLines.join('\n'):(t.status==='completed'&&tournamentWinner?'🏆 Tournament completed. **'+tournamentWinner+'** is the winner.':'No race results recorded.');
   const standingsEmbed=new EmbedBuilder().setTitle('📊 Point Standings').setDescription(clean(standingsText));
   const fixtureLines=matches.map((m:any)=>'**'+m.round_name+' #'+m.match_no+'** — '+(m.player1||'TBD')+' '+(m.score1??'-')+' - '+(m.score2??'-')+' '+(m.player2||'TBD')+' | '+(m.status==='completed'?'🏆 Winner: **'+(m.winner||'TBD')+'**':m.status==='bye'?'➡️ Bye: **'+(m.winner||'TBD')+'**':'⏳ Pending'));
@@ -111,9 +111,8 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
   const raceLines=raceResults.map((r:any)=>'**Race '+r.race_no+'** — '+r.track+' | P'+(r.position??'-')+' **'+r.player+'** — '+r.points+' pts'+(r.kd!=null?' | KD '+r.kd:''));
   const raceText=raceLines.length?raceLines.join('\n'):(t.status==='completed'&&tournamentWinner?'🏆 Tournament completed. **'+tournamentWinner+'** is the winner.\nNo race points were recorded for this tournament.':'No race results recorded.');
   const raceEmbed=new EmbedBuilder().setTitle('🏁 Race Results').setDescription(clean(raceText));
-  await i.editReply({embeds:[summary,participantEmbed,standingsEmbed,fixtureEmbed,raceEmbed]});
   const excel=tournamentExcel(t);
-  await i.followUp({content:'📥 **Excel Export — '+t.name+'**\nSame latest tournament report with result/winner details.',files:[excel],ephemeral:true});
+  await i.editReply({content:'📥 **Excel Export:** Latest tournament report with result/winner details is attached below.',embeds:[summary,participantEmbed,standingsEmbed,fixtureEmbed,raceEmbed],files:[excel]});
  }catch(e:any){
   console.error('Tournament report error:',e);
   if(i.replied||i.deferred)await i.editReply('❌ Could not generate the tournament report. Check the bot console for the exact error.');
