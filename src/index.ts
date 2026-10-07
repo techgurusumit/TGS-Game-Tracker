@@ -77,12 +77,25 @@ async function tournamentReport(i:ChatInputCommandInteraction|ButtonInteraction,
   const races=db.prepare("SELECT ra.id,ra.race_no,ra.track,ra.created_at FROM races ra WHERE ra.tournament_id=? ORDER BY ra.race_no").all(t.id) as any[];
   const raceResults=db.prepare("SELECT r.player_id,ra.race_no,ra.track,p.name player,r.position,r.points,r.kd FROM results r JOIN races ra ON ra.id=r.race_id JOIN players p ON p.id=r.player_id WHERE ra.tournament_id=? ORDER BY ra.race_no,r.position,p.name").all(t.id) as any[];
   const matches=db.prepare("SELECT m.round_no,m.round_name,m.match_no,p1.name player1,p2.name player2,w.name winner,m.score1,m.score2,m.status FROM matches m LEFT JOIN players p1 ON p1.id=m.player1_id LEFT JOIN players p2 ON p2.id=m.player2_id LEFT JOIN players w ON w.id=m.winner_id WHERE m.tournament_id=? ORDER BY m.round_no,m.match_no").all(t.id) as any[];
+  const fixturePoints=new Map<number,number>();
+  const addFixturePoints=(playerId:any,pts:number)=>{if(playerId==null||!Number.isFinite(pts))return;const id=Number(playerId);fixturePoints.set(id,(fixturePoints.get(id)||0)+pts)};
+  // Fixture-result points are part of the tournament standings too. A completed match
+  // gives its winner the configured win value, while the loser receives 0.
+  // For the 3rd-place decider, use the same winner value.
+  const fixtureWinPoints=Number((t as any).fixture_win_points ?? process.env.FIXTURE_WIN_POINTS ?? 1);
+  for(const m of matches){
+   if(String(m.status)==='completed'&&m.winner){addFixturePoints(m.winner_id ?? null,fixtureWinPoints)}
+   else if(String(m.status)==='bye'&&m.winner){addFixturePoints(m.winner_id ?? null,fixtureWinPoints)}
+  }
   const standings=parts.map((p:any)=>{
    const rr=raceResults.filter((x:any)=>Number(x.player_id)===Number(p.id));
-   const total=rr.reduce((sum:number,x:any)=>sum+Number(x.points||0),0);
+   const racePoints=rr.reduce((sum:number,x:any)=>sum+Number(x.points||0),0);
+   const matchPoints=fixturePoints.get(Number(p.id))||0;
+   const total=racePoints+matchPoints;
    const positions=rr.map((x:any)=>Number(x.position)).filter((x:number)=>Number.isFinite(x));
-   return {id:p.id,name:p.name,total_points:total,races:rr.length,best_position:positions.length?Math.min(...positions):null,avg_position:positions.length?positions.reduce((a:number,b:number)=>a+b,0)/positions.length:null};
-  }).sort((a:any,b:any)=>Number(b.total_points)-Number(a.total_points)||(a.best_position??999)-(b.best_position??999)||a.name.localeCompare(b.name));
+   const matchWins=matches.filter((m:any)=>Number(m.winner_id)===Number(p.id)&&['completed','bye'].includes(String(m.status))).length;
+   return {id:p.id,name:p.name,total_points:total,race_points:racePoints,match_points:matchPoints,races:rr.length,match_wins:matchWins,best_position:positions.length?Math.min(...positions):null,avg_position:positions.length?positions.reduce((a:number,b:number)=>a+b,0)/positions.length:null};
+  }).sort((a:any,b:any)=>Number(b.total_points)-Number(a.total_points)||(Number(b.match_wins)-Number(a.match_wins))||(a.best_position??999)-(b.best_position??999)||a.name.localeCompare(b.name));
   const finalMatch=db.prepare("SELECT m.round_name,m.match_no,p1.name player1,p2.name player2,w.name winner,m.score1,m.score2,m.status FROM matches m LEFT JOIN players p1 ON p1.id=m.player1_id LEFT JOIN players p2 ON p2.id=m.player2_id LEFT JOIN players w ON w.id=m.winner_id WHERE m.tournament_id=? AND m.round_name='Final' ORDER BY m.match_no DESC LIMIT 1").get(t.id) as any;
   const hasRacePoints=standings.some((r:any)=>Number(r.total_points||0)>0);
   const pointWinner=hasRacePoints?standings[0]:null;
