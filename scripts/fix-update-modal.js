@@ -76,6 +76,7 @@ if (!source.includes("i.commandName==='fixtures'")) {
 // Excel report compatibility: older SQLite databases may not have these columns.
 // Add them idempotently before the Excel queries use them.
 const migrationMarker = "console.log('Tournament update + game/fixture dropdown migration applied.');";
+// Keep report/export startup migrations in src/index.ts as well; build should remain idempotent.
 if (!source.includes("ALTER TABLE tournament_players ADD COLUMN joined_at")) {
   const migration = `try{db.prepare("ALTER TABLE tournament_players ADD COLUMN joined_at TEXT DEFAULT CURRENT_TIMESTAMP").run();}catch(_){}\ntry{db.prepare("ALTER TABLE matches ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP").run();}catch(_){}\n`;
   source = source.replace(migrationMarker, migration + migrationMarker);
